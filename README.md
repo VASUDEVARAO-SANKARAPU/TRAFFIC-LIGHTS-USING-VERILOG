@@ -1,172 +1,321 @@
-# Traffic Light Controller Using Verilog HDL
+# Density-Based Adaptive Traffic Light Controller Using Verilog HDL
 
-This project implements a four-way traffic light controller in Verilog HDL, using a finite-state-machine-based control sequence to cycle the north, south, east, and west lights through a fixed pattern.
+This project implements a four-direction traffic light controller in Verilog HDL where the green-light duration for each direction group is decided dynamically based on digital traffic-density inputs, instead of using a fixed timing value for every cycle.
 
 ## 1. Project Overview
 
-The controller manages traffic lights for four directions — North, South, East, and West. It is built around a clocked FSM that moves through six traffic-control states, each holding a specific combination of light values for all four directions.
+A standard traffic-light controller gives every direction the same green duration on every cycle, regardless of how much traffic is actually waiting. That wastes green time on a light direction with almost no traffic, and can under-serve a direction that's genuinely busy.
 
-Based on `TL.v`, the design uses:
+This design tries to address that by reading in a traffic-density level for each of the four directions and using it to pick a longer or shorter green time:
 
-- A `clk` input that drives all state transitions
-- An asynchronous `rst` input that returns the controller to the first state
-- A 3-bit `state` register that tracks the current FSM state
-- A 4-bit `count` register that times how long the controller stays in each state
-- Six states (`STATE1` through `STATE6`) that together form one full traffic cycle
-- Four 3-bit registered outputs (`light_north`, `light_south`, `light_east`, `light_west`) representing the light status for each direction
+```text
+Traffic Density Inputs
+        |
+        v
+Density Evaluation
+        |
+        v
+Calculate Green Time
+        |
+        v
+FSM Controls Traffic Lights
+        |
+        v
+Green → Yellow → Opposite Green → Yellow
+        |
+        v
+Continuous Operation
+```
+
+The four directions are grouped and controlled in pairs — **North-South** as one group, **East-West** as the other — the same way a real intersection typically operates, rather than controlling all four lights fully independently.
 
 ## 2. Project Objective
 
-This project was built to practice a slightly larger FSM than a basic 2-state design, and to combine state-based control with a counter for timed transitions. It demonstrates:
+The goal was to design an RTL-based traffic-light controller that:
 
-- Finite State Machine (FSM) design with six states
-- Sequential logic (state and counter updates on the clock edge)
-- Combinational-style output logic driven by the current state
-- Using a counter register to control how long each state is held
+- Uses a finite state machine to sequence through the light phases
+- Accepts digital traffic-density levels as inputs
+- Adjusts the green-light duration based on those density levels
+- Still maintains a fixed, safe yellow transition between green phases
+- Drives four 3-bit traffic-light outputs
+- Can be verified through Verilog simulation
+
+## 3. Features
+
+Based strictly on `Advanced_tl.v`:
+
+- Four-direction traffic-light control (North, South, East, West)
+- FSM-based control with four states
+- Digital traffic-density inputs (3 bits each, values 0–7)
+- Adaptive North-South green timing, based on `north_density`/`south_density`
+- Adaptive East-West green timing, based on `east_density`/`west_density`
+- Three density-based timing levels (low / medium / high)
+- Fixed yellow interval for both direction groups
+- Asynchronous reset
 - Clock-driven state transitions
-- Asynchronous reset behavior
-- RTL simulation and waveform analysis in Vivado
+- A Verilog testbench (`ATL_TB.v`) covering multiple density scenarios
+- Vivado RTL elaboration and behavioral simulation
 
-## 3. How the Controller Works
-
-```text
-Clock + Reset
-      |
-      v
-Initialize state = STATE1, count = 0
-      |
-      v
-Current State (STATE1 ... STATE6)
-      |
-      v
-Counter Checks State Duration (count vs TIME_x)
-      |
-      +------ count < TIME_x ------> count <= count + 1, stay in same state
-      |
-      +------ count == TIME_x -----> state <= next state, count <= 0
-                                              |
-                                              v
-                                 Output logic updates the four
-                                 light_* outputs for the new state
-                                              |
-                                              v
-                                     Cycle repeats from STATE1
-                                     after STATE6 completes
-```
-
-State transitions and the counter update occur on the **positive edge of `clk`**. The `rst` input is asynchronous — whenever `rst` goes high, `state` is forced to `STATE1` and `count` is forced to `0` immediately, independent of the clock edge.
-
-## 4. FSM State Sequence
-
-The six states are declared as `parameter` values `STATE1 = 0` through `STATE6 = 5`, and each one drives a fixed combination of light outputs.
-
-Looking at the light values used in the code, each of the four outputs only ever takes one of three values across the full cycle: `3'b001`, `3'b010`, and `3'b100`. Tracing how each individual light output changes from state to state, every light always moves in the same order — `3'b001` → `3'b010` → `3'b100` → (back to `3'b001` at the start of the next cycle) — and never skips or reverses. That pattern matches the standard sequence a traffic light follows (green, then yellow, then red), so based on the code's behavior:
-
-- `3'b001` = **Green**
-- `3'b010` = **Yellow**
-- `3'b100` = **Red**
-
-| State | North | South | East | West | Duration (count condition) |
-|-------|-------|-------|------|------|------------------------------|
-| `STATE1` | Green (`001`) | Green (`001`) | Red (`100`) | Red (`100`) | Held while `count < TIME_7` (`TIME_7 = 7`) |
-| `STATE2` | Green (`001`) | Yellow (`010`) | Red (`100`) | Red (`100`) | Held while `count < TIME_2` (`TIME_2 = 2`) |
-| `STATE3` | Green (`001`) | Red (`100`) | Green (`001`) | Red (`100`) | Held while `count < TIME_5` (`TIME_5 = 5`) |
-| `STATE4` | Yellow (`010`) | Red (`100`) | Yellow (`010`) | Red (`100`) | Held while `count < TIME_2` (`TIME_2 = 2`) |
-| `STATE5` | Red (`100`) | Red (`100`) | Red (`100`) | Green (`001`) | Held while `count < TIME_3` (`TIME_3 = 3`) |
-| `STATE6` | Red (`100`) | Red (`100`) | Red (`100`) | Yellow (`010`) | Held while `count < TIME_2` (`TIME_2 = 2`) |
-
-On the timing: the parameters `TIME_7`, `TIME_5`, `TIME_3`, and `TIME_2` are **clock-cycle counts**, not real seconds — the counter increments once per clock edge while `count < TIME_x`, and the state changes on the clock edge where `count` reaches `TIME_x`. So a state defined with `TIME_7` is actually held for 8 clock cycles in total (`count` runs 0 through 7 before the transition fires), and a state defined with `TIME_2` is held for 3 clock cycles, and so on — one more cycle than the `TIME_x` value itself, since the transition cycle is included.
-
-## 5. State Transition Flow
-
-```text
-STATE1
-   |
-   v
-STATE2
-   |
-   v
-STATE3
-   |
-   v
-STATE4
-   |
-   v
-STATE5
-   |
-   v
-STATE6
-   |
-   v
-STATE1  (cycle repeats)
-```
-
-The controller cycles through all six states in this fixed order and then loops back to `STATE1`, repeating indefinitely as long as `rst` is not asserted. The `count` register is what actually paces this — it increments every clock cycle while the current state's condition (`count < TIME_x`) holds true, and once `count` reaches that state's threshold, the state-control block moves `state` to the next value and resets `count` back to `0` for the new state.
-
-## 6. Input and Output Signals
+## 4. Inputs and Outputs
 
 | Signal | Direction | Width | Description |
 |--------|-----------|------:|-------------|
-| `clk` | Input | 1 bit | Clock input; state and counter updates happen on its rising edge |
-| `rst` | Input | 1 bit | Active-high asynchronous reset; forces `state` to `STATE1` and `count` to `0` |
-| `light_north` | Output | 3 bits | Light status for the north direction (`001`=Green, `010`=Yellow, `100`=Red) |
-| `light_south` | Output | 3 bits | Light status for the south direction |
-| `light_east` | Output | 3 bits | Light status for the east direction |
-| `light_west` | Output | 3 bits | Light status for the west direction |
+| `clk` | Input | 1 bit | Clock signal |
+| `rst` | Input | 1 bit | Asynchronous reset |
+| `north_density` | Input | 3 bits | Traffic-density level for North (0–7) |
+| `south_density` | Input | 3 bits | Traffic-density level for South (0–7) |
+| `east_density` | Input | 3 bits | Traffic-density level for East (0–7) |
+| `west_density` | Input | 3 bits | Traffic-density level for West (0–7) |
+| `light_north` | Output | 3 bits | North traffic-light state |
+| `light_south` | Output | 3 bits | South traffic-light state |
+| `light_east` | Output | 3 bits | East traffic-light state |
+| `light_west` | Output | 3 bits | West traffic-light state |
 
-## 7. Verilog Design Explanation
+Since each density input is 3 bits wide, it can represent a digital density level from 0 to 7. These are **not** percentages or real sensor readings — in the current design they're just numeric levels applied directly as test inputs.
 
-### State and counter registers
+The 3-bit light encoding used in the code:
 
-```verilog
-reg [2:0] state;
-reg [3:0] count;
+| Value | Meaning |
+|-------|---------|
+| `3'b001` | Green |
+| `3'b010` | Yellow |
+| `3'b100` | Red |
+
+## 5. Density-to-Timing Logic
+
+This is the core feature of the project. The controller calculates two separate green-time values — one for North-South, one for East-West — combinationally, based on whichever direction in that group has the higher density.
+
+### North-South Timing
+
+| Density Condition | Green Duration |
+|--------------------|----------------:|
+| `north_density >= 5` OR `south_density >= 5` | 20 clock counts |
+| `north_density >= 3` OR `south_density >= 3` | 12 clock counts |
+| Otherwise | 5 clock counts |
+
+### East-West Timing
+
+| Density Condition | Green Duration |
+|---------------------|----------------:|
+| `east_density >= 5` OR `west_density >= 5` | 20 clock counts |
+| `east_density >= 3` OR `west_density >= 3` | 12 clock counts |
+| Otherwise | 5 clock counts |
+
+These conditions are checked in order in the code, so the highest applicable density band wins — if either direction in a group is at or above the "high" threshold, that group gets the long green time, regardless of the other direction's value. Both `ns_time` and `ew_time` are computed in their own `always @(*)` blocks, so they update combinationally, immediately reflecting the current density inputs rather than being sampled only at specific clock edges.
+
+The yellow interval is fixed at **3 clock counts** for both groups, regardless of density.
+
+## 6. FSM Architecture
+
+| State | Active Direction | Light Behavior |
+|-------|--------------------|------------------|
+| `NS_GREEN` | North-South | North/South Green, East/West Red |
+| `NS_YELLOW` | North-South | North/South Yellow, East/West Red |
+| `EW_GREEN` | East-West | East/West Green, North/South Red |
+| `EW_YELLOW` | East-West | East/West Yellow, North/South Red |
+
+In the output logic, all four lights are first defaulted to `RED`, and then the relevant pair is overridden to `GREEN` or `YELLOW` depending on the current state. This means red doesn't need to be explicitly assigned in every state — it's just what's left over unless the state logic says otherwise.
+
+## 7. State Transition Diagram
+
+```text
+                 +-------------+
+                 |  NS_GREEN   |
+                 +-------------+
+                        |
+                  ns_time counts
+                        |
+                        v
+                 +-------------+
+                 |  NS_YELLOW  |
+                 +-------------+
+                        |
+                  3 clock counts
+                        |
+                        v
+                 +-------------+
+                 |  EW_GREEN   |
+                 +-------------+
+                        |
+                  ew_time counts
+                        |
+                        v
+                 +-------------+
+                 |  EW_YELLOW  |
+                 +-------------+
+                        |
+                  3 clock counts
+                        |
+                        v
+                 +-------------+
+                 |  NS_GREEN   |
+                 +-------------+
 ```
 
-`state` holds the current FSM state (only 3 values, 0–5, are actually used out of the 8 possible with 3 bits). `count` is a 4-bit register used purely as a timer within each state — it counts up from 0 and is compared against that state's `TIME_x` parameter to decide when to move on.
+The green-state duration (`ns_time` or `ew_time`) is density-dependent and can be 5, 12, or 20 clock counts. The yellow-state duration is always fixed at 3 clock counts, independent of density.
 
-### State-control logic
+## 8. Working Principle
 
-This is handled in the `always @(posedge clk or posedge rst)` block. On every rising clock edge, if `rst` is high, `state` and `count` are both cleared back to `STATE1` / `0`. Otherwise, a `case (state)` statement checks the current state's duration condition: if `count` hasn't yet reached that state's threshold, `count` increments and `state` stays the same; once the threshold is reached, `state` moves to the next state in sequence and `count` resets to `0` for the next state's timing.
+### Step 1 — Reset
 
-### Traffic light output logic
+When `rst` is asserted, `state` is forced to `NS_GREEN` and `count` is forced to `0`. Because the design uses:
 
-This is handled separately in the `always @(state)` block. It's a `case (state)` statement that assigns fixed values to `light_north`, `light_south`, `light_east`, and `light_west` for each of the six states, plus a `default` branch that sets all four outputs to `3'b000` if `state` ever holds a value outside `STATE1`–`STATE6`. Since this block is only sensitive to `state` (not `clk`), the outputs update combinationally whenever `state` changes, rather than being clocked directly — though in practice they only ever change right after a state transition on the clock edge.
+```verilog
+always @(posedge clk or posedge rst)
+```
 
-## 8. Testbench
+`rst` appears directly in the sensitivity list alongside `posedge clk`, which makes this an **asynchronous reset** — it takes effect immediately when `rst` goes high, not only at the next clock edge.
 
-`TL_tb.v` instantiates the controller as `dut` and connects it to `clk`, `rst`, and the four light outputs. It doesn't check for any expected values — it's a simulation-driving testbench rather than a self-checking one, meant for observing behavior on the waveform rather than automatically verifying it.
+### Step 2 — Determine North-South Timing
 
-- **Clock generation:** `clk` starts at `0`, and `forever #10 clk = ~clk;` toggles it every 10 ns, giving a clock period of 20 ns.
-- **Reset sequence:** `rst` starts low, is driven high for 100 ns (from t=100ns to t=200ns), and is then driven low again for the rest of the simulation.
-- **Run duration:** after the reset pulse, the simulation continues running for 200,000 ns before `$finish` is called, which is enough time to observe the controller cycling through the full six-state sequence multiple times.
+`ns_time` is continuously recalculated based on `north_density` and `south_density`, using the threshold logic described in Section 5.
 
-## 9. Simulation Results
+### Step 3 — North-South Green
 
-![Traffic Light Controller Simulation Waveform](https://raw.githubusercontent.com/VASUDEVARAO-SANKARAPU/TRAFFIC-LIGHTS-USING-VERILOG/refs/heads/main/images/timing_Traf_D.jpeg)
+During `NS_GREEN`, `count` increments each clock cycle. Once `count` reaches `ns_time - 1`, the FSM resets `count` to `0` and moves to `NS_YELLOW` on the next clock edge — meaning the state is actually held for exactly `ns_time` clock cycles in total.
+
+### Step 4 — North-South Yellow
+
+`NS_YELLOW` uses the same pattern but against a fixed threshold (`count < 2`), so it's held for exactly 3 clock cycles before moving to `EW_GREEN`.
+
+### Step 5 — East-West Green
+
+`EW_GREEN` behaves the same way as `NS_GREEN`, but timed against `ew_time` instead.
+
+### Step 6 — East-West Yellow
+
+`EW_YELLOW` behaves the same way as `NS_YELLOW` — a fixed 3-clock-cycle hold — before returning to `NS_GREEN`.
+
+### Step 7 — Repeat
+
+The FSM loops back to `NS_GREEN`, where `ns_time` is re-evaluated against whatever the density inputs currently are, so the timing can change from one cycle to the next if the density values change.
+
+## 9. Adaptive Behavior Example
+
+This example follows the actual scenarios applied in `ATL_TB.v`:
+
+**Scenario 1 — all densities low (`= 1`):** both North-South and East-West fall into the "otherwise" band, so both groups use **5 clock counts** of green time.
+
+**Scenario 2 — `north = 7, south = 6, east = 1, west = 1`:** North-South has a density ≥ 5, so `ns_time = 20`. East-West stays low, so `ew_time = 5`.
+
+**Scenario 3 — `north = 1, south = 1, east = 7, west = 6`:** now East-West has a density ≥ 5, so `ew_time = 20`, while North-South drops back to `ns_time = 5`.
+
+**Scenario 4 — all densities `= 3`:** both groups land in the middle band (`>= 3` but `< 5`), so both use **12 clock counts**.
+
+This sequence directly demonstrates the adaptive behavior — the green duration for each group changes as soon as the corresponding density inputs cross a threshold, without needing any change to the FSM structure itself.
+
+## 10. Testbench
+
+`ATL_TB.v` instantiates the controller as `dut` and connects it to all four density inputs, `clk`, `rst`, and the four light outputs.
+
+**Clock generation:**
+
+```verilog
+always
+begin
+    #5 clk = ~clk;
+end
+```
+
+This toggles `clk` every 5 ns, giving:
+
+```text
+Clock half-period = 5 ns
+Clock period      = 10 ns
+```
+
+**Test sequence:**
+
+```text
+Initial:
+  rst = 1
+  north_density = south_density = east_density = west_density = 1
+
+After 20 ns:
+  rst = 0
+
+After another 100 ns:
+  north_density = 7, south_density = 6, east_density = 1, west_density = 1
+
+After another 300 ns:
+  north_density = 1, south_density = 1, east_density = 7, west_density = 6
+
+After another 300 ns:
+  north_density = south_density = east_density = west_density = 3
+
+After another 300 ns:
+  $finish is called, simulation ends
+```
+
+This covers a low-density case, a high North-South density case, a high East-West density case, and a medium-density case for both groups. The testbench doesn't include any assertions or automatic pass/fail checking — it's meant for observing the light outputs on the waveform as the density inputs change.
+
+## 11. Simulation Results
+
+![Adaptive Traffic Light Simulation](https://raw.githubusercontent.com/VASUDEVARAO-SANKARAPU/TRAFFIC-LIGHTS-USING-VERILOG/refs/heads/main/ATL_IMAGES/ATL_Timing.jpg)
 
 From the waveform:
 
-- `clk` toggles continuously at a fixed rate throughout the simulation, matching the `#10` clock generation in the testbench.
-- `rst` is visible going high briefly near the start of the simulation before returning low, matching the reset pulse applied in the testbench.
-- `light_north`, `light_south`, `light_east`, and `light_west` are each shown as 3-bit values, and the waveform displays them changing between the numeric values `1`, `2`, and `4` — these correspond to `3'b001` (Green), `3'b010` (Yellow), and `3'b100` (Red) respectively.
-- Each of the four light signals changes at a different pace and holds its value for a different length of time before switching, which is consistent with the different `TIME_x` durations assigned to each state in the code.
-- The light values repeat their pattern over time, which is consistent with the controller cycling from `STATE1` through `STATE6` and back to `STATE1` continuously after reset is released.
+- `clk` toggles continuously at a fixed rate throughout, and `rst` is visible high briefly at the very start before being released, matching the testbench's reset pulse.
+- `north_density`, `south_density`, `east_density`, and `west_density` step through the four test scenarios described above — visible in the waveform as `1`, then `7`/`6` on North/South, then `7`/`6` on East/West, then `3` on all four.
+- `light_north` and `light_south` are shown cycling through the values `1`, `2`, and `4`, corresponding to `3'b001` (Green), `3'b010` (Yellow), and `3'b100` (Red).
+- `light_east` and `light_west` show the same three values, but out of phase with North/South — while North/South show green (`1`), East/West show red (`4`), and vice versa, which matches the FSM only ever having one group active at a time.
+- The North-South green segment visibly widens during the high-North-South-density scenario, and the East-West green segment visibly widens during the high-East-West-density scenario, compared to the low- and medium-density segments — this is consistent with the `ns_time`/`ew_time` values of 5, 12, and 20 clock counts changing the duration of each group's green phase.
 
-## 10. RTL / Elaborated Schematic
+## 12. RTL / Elaborated Schematic
 
-![Traffic Light Controller RTL Schematic](https://raw.githubusercontent.com/VASUDEVARAO-SANKARAPU/TRAFFIC-LIGHTS-USING-VERILOG/refs/heads/main/images/schematic_Traf_D.jpeg)
+```markdown
+![Adaptive Traffic Light RTL Schematic](https://raw.githubusercontent.com/VASUDEVARAO-SANKARAPU/TRAFFIC-LIGHTS-USING-VERILOG/refs/heads/main/ATL_IMAGES/ATL_schematic.jpg)
+```
 
-This is the elaborated design view generated by Vivado from the RTL code, before any technology mapping to actual FPGA logic cells — it shows the generic hardware structure the tool infers from the Verilog description, not a physical FPGA implementation.
+**Note on the schematic file:** the file uploaded as `ATL_schematic.jpg` for this section is actually an identical copy of the same simulation waveform used in Section 11 — it is not an RTL/elaborated schematic view. I can't describe the specific muxes, registers, or nets from it, since it doesn't show that view. You'll want to open `Advanced_tl.v` in Vivado, run **Open Elaborated Design**, and capture the actual schematic screenshot to replace this file before publishing.
 
-Visible in the schematic:
+In general, based on the actual RTL code, an elaborated schematic of this design would be expected to show:
 
-- **`state_reg[2:0]`** — the state register, along with **`count_reg[3:0]`** — the counter register. Both are the sequential elements coming from the `always @(posedge clk or posedge rst)` block.
-- A large number of **multiplexer (`MUX`) blocks** driving both `state_i` and `count_i` — these implement the `case (state)` comparisons and the count-vs-`TIME_x` conditions from the state-control logic.
-- Additional mux logic feeding the four light outputs (`light_north`, `light_south`, `light_east`, `light_west`) on the right side, corresponding to the second `always @(state)` output block.
-- The tool reports **29 cells and 69 nets** for this design, which reflects the added complexity of the counter and six-state comparison logic compared to a simpler 2-state FSM.
+- Density-comparison logic for both `ns_time` and `ew_time`, likely represented as comparator and multiplexer chains selecting between 5, 12, and 20
+- A 2-bit state register (`state_reg`) and a separate counter register (`count_reg`) for timing each phase
+- Combinational logic implementing the `case (state)` next-state and yellow/green duration checks
+- Combinational output logic driving the four `light_*` outputs based on the current state
+- Four separate output paths for `light_north`, `light_south`, `light_east`, and `light_west`
 
-## 11. Tools Used
+This description is based on the code structure, not a confirmed reading of an actual schematic — replace it with real observations once the correct screenshot is available.
+
+## 13. Verilog Design Structure
+
+`Advanced_tl.v` is organized into four separate `always` blocks:
+
+### Density calculation
+
+Two `always @(*)` blocks compute `ns_time` and `ew_time` combinationally, each using its own threshold comparison against the relevant pair of density inputs, as described in Section 5.
+
+### Sequential FSM and counter
+
+The `always @(posedge clk or posedge rst)` block holds the actual state machine. It handles the asynchronous reset, and for each state, checks `count` against the appropriate duration (`ns_time`, `ew_time`, or the fixed value `2` for yellow phases) to decide whether to keep incrementing `count` or move to the next state and reset `count` to `0`.
+
+### Output logic
+
+A separate `always @(*)` block sets all four light outputs to `RED` by default, then overrides the relevant pair to `GREEN` or `YELLOW` based on the current `state`. Because this block only depends on `state`, the outputs update combinationally as soon as the state changes.
+
+## 14. Timing Behavior
+
+```text
+Low density    → 5 clock counts
+Medium density → 12 clock counts
+High density   → 20 clock counts
+Yellow         → 3 clock counts
+```
+
+These are clock-cycle counts, not seconds. Using the testbench's 10 ns clock period, these correspond to the following simulated durations:
+
+```text
+5 counts  ≈ 50 ns
+12 counts ≈ 120 ns
+20 counts ≈ 200 ns
+3 counts  ≈ 30 ns
+```
+
+These durations are only valid for the 10 ns clock period used in this specific testbench — they would scale differently under a different clock frequency, and none of them represent real-world seconds.
+
+## 15. Tools and Technologies
 
 - Verilog HDL
 - Xilinx Vivado
@@ -174,49 +323,64 @@ Visible in the schematic:
 - Behavioral Simulation
 - Verilog Testbench
 
-## 12. Project Files
+No FPGA hardware implementation was performed — this project is demonstrated through RTL elaboration and behavioral simulation only.
 
-| File | Purpose |
-|------|---------|
-| `TL.v` | Main traffic light controller (FSM, counter, output logic) |
-| `TL_tb.v` | Testbench used to drive the clock/reset and run the simulation |
-| `images/schematic_Traf_D.jpeg` | Elaborated RTL schematic from Vivado |
-| `images/timing_Traf_D.jpeg` | Behavioral simulation waveform |
+## 16. Project Files
+
+| File | Description |
+|------|--------------|
+| `Advanced_tl.v` | Density-based adaptive traffic-light controller |
+| `ATL_TB.v` | Testbench for adaptive traffic-light simulation |
+| `ATL_IMAGES/ATL_schematic.jpg` | Intended to hold the Vivado elaborated RTL schematic (currently a duplicate of the timing waveform — see Section 12) |
+| `ATL_IMAGES/ATL_Timing.jpg` | Behavioral simulation waveform |
 | `README.md` | Project documentation |
 
-## 13. How to Run the Project in Vivado
+## 17. How to Run the Project in Vivado
 
 1. Open Xilinx Vivado.
 2. Create a new RTL project.
-3. Add `TL.v` as the design source.
-4. Add `TL_tb.v` as the simulation source.
-5. Set `Traffic_Light_Controller_TB` as the simulation top module if Vivado doesn't pick it up automatically.
+3. Add `Advanced_tl.v` as the design source.
+4. Add `ATL_TB.v` as the simulation source.
+5. Set `traffic_light_density_tb` as the simulation top module if Vivado doesn't select it automatically.
 6. Run **Behavioral Simulation** from the Flow Navigator.
-7. Add `light_north`, `light_south`, `light_east`, and `light_west` to the waveform window if they aren't already listed.
-8. Observe the state-dependent light sequence as the simulation progresses through the reset pulse and the repeating six-state cycle.
+7. Add the four density inputs (`north_density`, `south_density`, `east_density`, `west_density`) to the waveform.
+8. Add the four traffic-light outputs (`light_north`, `light_south`, `light_east`, `light_west`) to the waveform.
+9. Adjust the simulation time scale as needed to clearly see how the green-phase width changes between the low, medium, and high density scenarios.
 
-## 14. Learning Outcomes
+## 18. Learning Outcomes
 
-- Designing a multi-state FSM in Verilog, beyond a simple two-state design
-- Using a counter register alongside a state register to control timed state transitions
-- Understanding the split between sequential logic (state/counter updates) and the state-driven output logic
-- Implementing and testing asynchronous reset behavior
-- Writing a basic, non-self-checking testbench for clock and reset generation
+- Designing an FSM with multiple states in Verilog
+- Using a counter register to time each FSM state
+- Implementing combinational density-comparison logic to drive a decision (`ns_time`, `ew_time`)
+- Feeding a dynamically computed value into a sequential timing comparison, rather than a fixed constant
+- Working with multiple related input signals (four density inputs, grouped into two decision paths)
+- Designing safe green → yellow → opposite-green → yellow transitions
+- Writing a Verilog testbench that exercises several distinct input scenarios
 - Running behavioral simulation in Vivado and reading a multi-signal waveform
-- Interpreting an RTL schematic and connecting it back to the original Verilog description
+- Understanding RTL elaboration and being able to tell when a screenshot doesn't actually match the design it's supposed to represent
 
-## 15. Possible Future Improvements
+## 19. Possible Future Improvements
 
-These are potential extensions and are not part of the current implementation:
+These are potential extensions, not part of the current implementation:
 
-- Making the `TIME_x` duration values configurable instead of fixed parameters
-- Adding vehicle sensors for adaptive/traffic-responsive control
-- Adding a pedestrian crossing signal and control logic
+- Interfacing the density inputs with actual vehicle sensors instead of manually applied test values
+- Using a parameterized clock divider so the timing values correspond to real-world seconds
+- Adding pedestrian crossing control
 - Adding emergency-vehicle priority handling
-- Adding a seven-segment countdown display for the active state's remaining time
-- Implementing and testing the design on an actual FPGA board
-- Building out more advanced traffic scheduling (e.g., turn lanes, variable cycle lengths)
+- Making the timing thresholds and durations configurable instead of hardcoded
+- Adding dedicated vehicle-count sensors
+- FPGA board implementation and hardware testing
+- Adding seven-segment countdown displays for the active phase
+- Adding fairness logic so one direction group can't be starved indefinitely by consistently low density
 
-## 16. Conclusion
+## 20. Limitations
 
-This project shows how a repeating, real-world sequence like a traffic light cycle can be represented cleanly as a Verilog FSM, using a state register combined with a counter for timing. Building it end-to-end — from the RTL code, to a driving testbench, to reading the simulation waveform and the elaborated schematic — reinforced core RTL design ideas: sequential vs. combinational logic, asynchronous reset handling, and how a `case`-based state machine actually maps down to registers and multiplexers in hardware.
+- Density values are supplied directly as 3-bit digital inputs — there's no actual sensor or detection hardware behind them in this project.
+- The current design doesn't interface with any physical traffic sensors, cameras, or IoT devices.
+- All timing values are expressed and verified in clock counts, not real-world seconds.
+- The testbench uses a simplified 10 ns clock period purely for simulation convenience.
+- The controller only alternates between two fixed direction groups (North-South and East-West) — it doesn't control each of the four directions fully independently.
+
+## 21. Conclusion
+
+This project extends a conventional FSM-based traffic-light controller by making the green-light duration for each direction group depend on digital traffic-density inputs, rather than using one fixed value for every cycle. Building it required combining a counter-timed FSM with combinational threshold logic that recalculates the green duration on the fly, and verifying that behavior across several density scenarios in simulation. It's a practical example of how adaptive decision-making can be layered on top of a standard sequential control structure in Verilog.
