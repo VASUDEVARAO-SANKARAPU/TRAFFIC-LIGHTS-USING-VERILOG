@@ -263,11 +263,9 @@ From the waveform:
 
 ## 12. RTL / Elaborated Schematic
 
-```markdown
 ![Adaptive Traffic Light RTL Schematic](https://raw.githubusercontent.com/VASUDEVARAO-SANKARAPU/TRAFFIC-LIGHTS-USING-VERILOG/refs/heads/main/ATL_IMAGES/ATL_schematic.jpg)
-```
 
-**Note on the schematic file:** the file uploaded as `ATL_schematic.jpg` for this section is actually an identical copy of the same simulation waveform used in Section 11 — it is not an RTL/elaborated schematic view. I can't describe the specific muxes, registers, or nets from it, since it doesn't show that view. You'll want to open `Advanced_tl.v` in Vivado, run **Open Elaborated Design**, and capture the actual schematic screenshot to replace this file before publishing.
+**Note on the schematic file:** the file uploaded as `ATL_schematic.jpg` for this section is actually an identical copy of the same simulation waveform used in Section 11 — it is not an RTL/elaborated schematic view. Once it's fixed at the URL above, the image embed here will correctly show the real schematic; until then, this link will just display the same waveform image again. I can't describe the specific muxes, registers, or nets from it, since it doesn't show that view. You'll want to open `Advanced_tl.v` in Vivado, run **Open Elaborated Design**, and capture the actual schematic screenshot to replace this file before publishing.
 
 In general, based on the actual RTL code, an elaborated schematic of this design would be expected to show:
 
